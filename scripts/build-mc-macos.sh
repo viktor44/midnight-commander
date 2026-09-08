@@ -162,10 +162,15 @@ make install
 #
 # Gettext (libintl, needed statically by both glib and mc)
 #
+# Only gettext-runtime is built: gettext-tools drags in libtextstyle, which
+# does not compile with current clang (incompatible-function-pointer-types is
+# an error now), and mc needs nothing from it.
+#
 unpack "gettext-$GETTEXT_VERSION.tar.gz"
+cd gettext-runtime
 ./configure --prefix="$path_to_install" --enable-static --disable-shared \
-  --disable-java --disable-csharp --disable-c++ --without-emacs \
-  --disable-openmp --with-included-libxml --with-included-libunistring
+  --disable-java --disable-csharp --without-emacs --disable-openmp \
+  --disable-libasprintf
 make -j "$PARALLEL_JOBS"
 make install
 
