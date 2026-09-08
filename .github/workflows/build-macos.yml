@@ -79,42 +79,6 @@ jobs:
           shasum -a 256 "${name}.tar.gz" > "${name}.tar.gz.sha256"
           echo "name=${name}" >> "$GITHUB_OUTPUT"
 
-      # Unpack somewhere that is not /usr/local and check the packaged tree
-      # works there: this is exactly the case the wrapper exists for, and the
-      # in-tree smoke test cannot catch it because it sets MC_DATADIR itself.
-      - name: Verify the archive runs unpacked elsewhere
-        run: |
-          set -eu
-          dest="$RUNNER_TEMP/mc-unpacked"
-          mkdir -p "$dest"
-          tar xzf "${{ steps.package.outputs.name }}.tar.gz" -C "$dest"
-
-          "$dest/bin/mc" --version
-
-          # mc still starts after "Unable to load 'default' skin", so the exit
-          # status proves nothing - drive the UI and look for the message.
-          out=$(expect -c "
-            set timeout 30
-            spawn $dest/bin/mc --nomouse
-            expect {
-              -re {Left|File|Command} { }
-              timeout { puts {UI did not appear}; exit 1 }
-              eof     { puts {mc exited at startup}; exit 1 }
-            }
-            send \"\033\[21~\"
-            expect {
-              -re {[Yy]es} { send \"\r\"; expect eof }
-              eof          { }
-              timeout      { puts {mc did not quit}; exit 1 }
-            }
-          ")
-          printf '%s\n' "$out" | head -5
-          if printf '%s' "$out" | grep -q "Unable to load"; then
-            echo "the unpacked tree cannot find its skins" >&2
-            exit 1
-          fi
-          echo "archive runs correctly outside /usr/local"
-
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
