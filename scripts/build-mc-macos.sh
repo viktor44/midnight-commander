@@ -42,28 +42,59 @@ PARALLEL_JOBS="${PARALLEL_JOBS:-$(sysctl -n hw.ncpu)}"
 GLIB_VERSION="$GLIB_MAJOR_VERSION.$GLIB_MINOR_VERSION"
 
 #
-# Download helper: fetch $2 into $path_to_source/$1 unless already present.
+# Download helper: fetch $1 into $path_to_source unless already present, trying
+# each of the remaining arguments in turn. Mirrors go down; ftpmirror.gnu.org
+# in particular hands CI runners 502s often enough to break the build.
 #
 fetch() {
-  if [ ! -f "$path_to_source/$1" ]; then
-    echo "Download $1"
-    curl -fL --retry 3 "$2" -o "$path_to_source/$1.part"
-    mv "$path_to_source/$1.part" "$path_to_source/$1"
-  fi
+  name="$1"
+  shift
+  [ -f "$path_to_source/$name" ] && return 0
+  for url in "$@"; do
+    echo "Download $name from $url"
+    if curl -fL --retry 3 --connect-timeout 30 "$url" -o "$path_to_source/$name.part"; then
+      mv "$path_to_source/$name.part" "$path_to_source/$name"
+      return 0
+    fi
+    rm -f "$path_to_source/$name.part"
+    echo "  mirror failed, trying next"
+  done
+  echo "ERROR: could not download $name" >&2
+  return 1
 }
 
-fetch "m4-$M4_VERSION.tar.gz" "https://ftpmirror.gnu.org/m4/m4-$M4_VERSION.tar.gz"
-fetch "autoconf-$AUTOCONF_VERSION.tar.gz" "https://ftpmirror.gnu.org/autoconf/autoconf-$AUTOCONF_VERSION.tar.gz"
-fetch "automake-$AUTOMAKE_VERSION.tar.gz" "https://ftpmirror.gnu.org/automake/automake-$AUTOMAKE_VERSION.tar.gz"
-fetch "libtool-$LIBTOOL_VERSION.tar.gz" "https://ftpmirror.gnu.org/libtool/libtool-$LIBTOOL_VERSION.tar.gz"
-fetch "pkg-config-$PKGCONFIG_VERSION.tar.gz" "https://pkgconfig.freedesktop.org/releases/pkg-config-$PKGCONFIG_VERSION.tar.gz"
-fetch "libffi-$LIBFFI_VERSION.tar.gz" "https://github.com/libffi/libffi/releases/download/v$LIBFFI_VERSION/libffi-$LIBFFI_VERSION.tar.gz"
-fetch "gettext-$GETTEXT_VERSION.tar.gz" "https://ftpmirror.gnu.org/gettext/gettext-$GETTEXT_VERSION.tar.gz"
-fetch "pcre2-$PCRE2_VERSION.tar.gz" "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-$PCRE2_VERSION/pcre2-$PCRE2_VERSION.tar.gz"
-fetch "ninja-$NINJA_VERSION.tar.gz" "https://github.com/ninja-build/ninja/archive/refs/tags/v$NINJA_VERSION.tar.gz"
-fetch "meson-$MESON_VERSION.tar.gz" "https://github.com/mesonbuild/meson/releases/download/$MESON_VERSION/meson-$MESON_VERSION.tar.gz"
-fetch "glib-$GLIB_VERSION.tar.xz" "https://ftp.gnome.org/pub/gnome/sources/glib/$GLIB_MAJOR_VERSION/glib-$GLIB_VERSION.tar.xz"
-fetch "mc-$MC_VERSION.tar.bz2" "http://ftp.midnight-commander.org/mc-$MC_VERSION.tar.bz2"
+#
+# GNU packages: $1 = tarball name, $2 = project directory on the GNU servers.
+#
+gnu_fetch() {
+  fetch "$1" \
+    "https://ftp.gnu.org/gnu/$2/$1" \
+    "https://mirrors.kernel.org/gnu/$2/$1" \
+    "https://ftpmirror.gnu.org/$2/$1"
+}
+
+gnu_fetch "m4-$M4_VERSION.tar.gz" m4
+gnu_fetch "autoconf-$AUTOCONF_VERSION.tar.gz" autoconf
+gnu_fetch "automake-$AUTOMAKE_VERSION.tar.gz" automake
+gnu_fetch "libtool-$LIBTOOL_VERSION.tar.gz" libtool
+gnu_fetch "gettext-$GETTEXT_VERSION.tar.gz" gettext
+fetch "pkg-config-$PKGCONFIG_VERSION.tar.gz" \
+  "https://pkgconfig.freedesktop.org/releases/pkg-config-$PKGCONFIG_VERSION.tar.gz" \
+  "https://distfiles.macports.org/pkgconfig/pkg-config-$PKGCONFIG_VERSION.tar.gz"
+fetch "libffi-$LIBFFI_VERSION.tar.gz" \
+  "https://github.com/libffi/libffi/releases/download/v$LIBFFI_VERSION/libffi-$LIBFFI_VERSION.tar.gz"
+fetch "pcre2-$PCRE2_VERSION.tar.gz" \
+  "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-$PCRE2_VERSION/pcre2-$PCRE2_VERSION.tar.gz"
+fetch "ninja-$NINJA_VERSION.tar.gz" \
+  "https://github.com/ninja-build/ninja/archive/refs/tags/v$NINJA_VERSION.tar.gz"
+fetch "meson-$MESON_VERSION.tar.gz" \
+  "https://github.com/mesonbuild/meson/releases/download/$MESON_VERSION/meson-$MESON_VERSION.tar.gz"
+fetch "glib-$GLIB_VERSION.tar.xz" \
+  "https://download.gnome.org/sources/glib/$GLIB_MAJOR_VERSION/glib-$GLIB_VERSION.tar.xz" \
+  "https://ftp.gnome.org/pub/gnome/sources/glib/$GLIB_MAJOR_VERSION/glib-$GLIB_VERSION.tar.xz"
+fetch "mc-$MC_VERSION.tar.bz2" \
+  "http://ftp.midnight-commander.org/mc-$MC_VERSION.tar.bz2" \
+  "https://ftp.osuosl.org/pub/midnightcommander/mc-$MC_VERSION.tar.bz2"
 echo "Download complete!"
 
 #
