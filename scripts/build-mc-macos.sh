@@ -238,5 +238,7 @@ make install DESTDIR="$path_to_stage"
 
 echo
 echo "Built mc $MC_VERSION, staged under $path_to_stage$MC_INSTALL_DIRECTORY"
-"$path_to_stage$MC_INSTALL_DIRECTORY/bin/mc" --version
+# mc bails out with "The TERM environment variable is unset!" before it gets
+# as far as printing --version, and CI runners have no TERM.
+TERM="${TERM:-xterm}" "$path_to_stage$MC_INSTALL_DIRECTORY/bin/mc" --version
 otool -L "$path_to_stage$MC_INSTALL_DIRECTORY/bin/mc"

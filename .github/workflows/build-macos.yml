@@ -14,6 +14,8 @@ on:
 
 env:
   MC_VERSION: ${{ github.event.inputs.mc_version || '4.8.33' }}
+  # Runners have no TERM, and mc refuses to start without one.
+  TERM: xterm
 
 jobs:
   build:
