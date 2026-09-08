@@ -35,7 +35,7 @@ jobs:
           key: mc-src-${{ runner.os }}-${{ hashFiles('scripts/build-mc-macos.sh') }}-${{ env.MC_VERSION }}
 
       - name: Build
-        run: ./scripts/build-mc-macos.sh
+        run: sh ./scripts/build-mc-macos.sh
         env:
           MC_VERSION: ${{ env.MC_VERSION }}
 
