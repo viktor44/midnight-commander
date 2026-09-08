@@ -169,8 +169,7 @@ make install
 unpack "gettext-$GETTEXT_VERSION.tar.gz"
 cd gettext-runtime
 ./configure --prefix="$path_to_install" --enable-static --disable-shared \
-  --disable-java --disable-csharp --without-emacs --disable-openmp \
-  --disable-libasprintf
+  --disable-java --disable-csharp --disable-libasprintf
 make -j "$PARALLEL_JOBS"
 make install
 
