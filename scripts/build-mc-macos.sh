@@ -183,13 +183,16 @@ make install
 # library and segfaults on the first curses call. There is also no ncursesw at
 # all, which loses UTF-8. Build our own and link it statically.
 #
+# Deliberately no --with-termlib: it splits the terminfo half out into
+# libtinfow, and mc's configure probes for has_colors with a bare -lncursesw,
+# which then fails to link.
+#
 unpack "ncurses-$NCURSES_VERSION.tar.gz"
 ./configure --prefix="$path_to_install" \
   --without-shared --with-normal --without-debug --without-ada --without-tests \
   --without-manpages --without-cxx-binding \
   --enable-widec --enable-ext-colors --enable-ext-mouse \
   --enable-pc-files --with-pkg-config-libdir="$path_to_install/lib/pkgconfig" \
-  --with-termlib \
   --with-default-terminfo-dir="$MC_INSTALL_DIRECTORY/share/terminfo" \
   --with-terminfo-dirs="$MC_INSTALL_DIRECTORY/share/terminfo:/usr/share/terminfo:/opt/homebrew/share/terminfo" \
   --enable-symlinks --disable-stripping
@@ -248,7 +251,7 @@ unpack "mc-$MC_VERSION.tar.bz2"
 MC_FRAMEWORKS="-framework Foundation -framework CoreFoundation -framework AppKit -framework Carbon"
 MC_GLIB_LIBS="$path_to_install/lib/libglib-2.0.a $path_to_install/lib/libintl.a -liconv -lm $MC_FRAMEWORKS -lpcre2-8"
 # Our static ncursesw, not the 5.4 stub in /usr/lib.
-MC_CURSES_LIBS="$path_to_install/lib/libncursesw.a $path_to_install/lib/libtinfow.a"
+MC_CURSES_LIBS="$path_to_install/lib/libncursesw.a"
 CFLAGS="-I$path_to_install/include" \
 LDFLAGS="-L$path_to_install/lib" \
 ./configure --prefix="$MC_INSTALL_DIRECTORY" \
