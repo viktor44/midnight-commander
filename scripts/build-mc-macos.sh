@@ -192,10 +192,15 @@ unpack "ncurses-$NCURSES_VERSION.tar.gz"
   --with-termlib \
   --with-default-terminfo-dir=/usr/share/terminfo \
   --with-terminfo-dirs="/usr/share/terminfo:/usr/local/share/terminfo:/opt/homebrew/share/terminfo" \
-  --with-fallbacks="xterm,xterm-256color,xterm-color,screen,screen-256color,tmux,tmux-256color,vt100,ansi,dumb,linux,rxvt-unicode-256color,alacritty,ghostty" \
   --enable-symlinks --disable-stripping
 make -j "$PARALLEL_JOBS"
 make install
+
+# Compiling terminfo entries into the library (--with-fallbacks) would need a
+# working tic before ncurses is built, and the tic macOS ships is 5.4: it dies
+# on the modern terminfo.src with "error writing .../scrt". Keep the database
+# on disk instead - install put it under share/terminfo, built by the tic from
+# this very tree - and let the packaged launcher point TERMINFO_DIRS at it.
 
 #
 # PCRE2 (mc's search engine)
@@ -262,6 +267,10 @@ make -j "$PARALLEL_JOBS"
 rm -rf "$path_to_stage"
 make install DESTDIR="$path_to_stage"
 
+# Ship the terminfo database we compiled, so the binary is not at the mercy of
+# whatever entries the target machine happens to have.
+cp -R "$path_to_install/share/terminfo" "$path_to_stage$MC_INSTALL_DIRECTORY/share/terminfo"
+
 echo
 echo "Built mc $MC_VERSION, staged under $path_to_stage$MC_INSTALL_DIRECTORY"
 # mc bails out with "The TERM environment variable is unset!" before it gets
@@ -278,7 +287,9 @@ if ! command -v expect >/dev/null 2>&1; then
   exit 0
 fi
 echo "Smoke test: starting the full-screen UI"
-TERM=xterm MC_DATADIR="$path_to_stage$MC_INSTALL_DIRECTORY/share/mc" \
+TERM=xterm \
+MC_DATADIR="$path_to_stage$MC_INSTALL_DIRECTORY/share/mc" \
+TERMINFO_DIRS="$path_to_stage$MC_INSTALL_DIRECTORY/share/terminfo:/usr/share/terminfo" \
   expect -c "
     set timeout 30
     spawn $path_to_stage$MC_INSTALL_DIRECTORY/bin/mc --nomouse

@@ -57,6 +57,7 @@ jobs:
           # Portable launcher: run mc from wherever this archive was unpacked.
           here=$(cd "$(dirname "$0")" && pwd)
           export MC_DATADIR="$here/share/mc"
+          export TERMINFO_DIRS="$here/share/terminfo:${TERMINFO_DIRS:-/usr/share/terminfo}"
           exec "$here/bin/mc" "$@"
           WRAPPER
           chmod +x tmp/stagedir/usr/local/mc
