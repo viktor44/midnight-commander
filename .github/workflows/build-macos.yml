@@ -47,6 +47,20 @@ jobs:
           set -eu
           arch=$(uname -m)
           name="mc-${MC_VERSION}-macos-${arch}"
+
+          # mc has /usr/local baked in as its prefix, so an archive unpacked
+          # anywhere else finds no skins, syntax files or help. Ship a launcher
+          # that points MC_DATADIR and friends at wherever it was extracted;
+          # installing into /usr/local still works via bin/mc directly.
+          cat > tmp/stagedir/usr/local/mc <<'WRAPPER'
+          #!/bin/sh
+          # Portable launcher: run mc from wherever this archive was unpacked.
+          here=$(cd "$(dirname "$0")" && pwd)
+          export MC_DATADIR="$here/share/mc"
+          exec "$here/bin/mc" "$@"
+          WRAPPER
+          chmod +x tmp/stagedir/usr/local/mc
+
           tar czf "${name}.tar.gz" -C tmp/stagedir/usr/local .
           shasum -a 256 "${name}.tar.gz" > "${name}.tar.gz.sha256"
           echo "name=${name}" >> "$GITHUB_OUTPUT"

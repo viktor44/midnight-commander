@@ -31,6 +31,7 @@ PKGCONFIG_VERSION="${PKGCONFIG_VERSION:-0.29.2}"
 LIBFFI_VERSION="${LIBFFI_VERSION:-3.5.2}"
 GETTEXT_VERSION="${GETTEXT_VERSION:-0.26}"
 PCRE2_VERSION="${PCRE2_VERSION:-10.48}"
+NCURSES_VERSION="${NCURSES_VERSION:-6.6}"
 NINJA_VERSION="${NINJA_VERSION:-1.13.1}"
 MESON_VERSION="${MESON_VERSION:-1.8.4}"
 GLIB_MAJOR_VERSION="${GLIB_MAJOR_VERSION:-2.85}"
@@ -78,6 +79,7 @@ gnu_fetch "autoconf-$AUTOCONF_VERSION.tar.gz" autoconf
 gnu_fetch "automake-$AUTOMAKE_VERSION.tar.gz" automake
 gnu_fetch "libtool-$LIBTOOL_VERSION.tar.gz" libtool
 gnu_fetch "gettext-$GETTEXT_VERSION.tar.gz" gettext
+gnu_fetch "ncurses-$NCURSES_VERSION.tar.gz" ncurses
 fetch "pkg-config-$PKGCONFIG_VERSION.tar.gz" \
   "https://pkgconfig.freedesktop.org/releases/pkg-config-$PKGCONFIG_VERSION.tar.gz" \
   "https://distfiles.macports.org/pkgconfig/pkg-config-$PKGCONFIG_VERSION.tar.gz"
@@ -174,6 +176,28 @@ make -j "$PARALLEL_JOBS"
 make install
 
 #
+# Ncurses (wide-character build)
+#
+# macOS ships ncurses.h from 6.0 but only /usr/lib/libncurses.5.4.dylib, so a
+# binary compiled against the SDK headers writes 6.x-shaped structs into a 5.4
+# library and segfaults on the first curses call. There is also no ncursesw at
+# all, which loses UTF-8. Build our own and link it statically.
+#
+unpack "ncurses-$NCURSES_VERSION.tar.gz"
+./configure --prefix="$path_to_install" \
+  --without-shared --with-normal --without-debug --without-ada --without-tests \
+  --without-manpages --without-cxx-binding \
+  --enable-widec --enable-ext-colors --enable-ext-mouse \
+  --enable-pc-files --with-pkg-config-libdir="$path_to_install/lib/pkgconfig" \
+  --with-termlib \
+  --with-default-terminfo-dir=/usr/share/terminfo \
+  --with-terminfo-dirs="/usr/share/terminfo:/usr/local/share/terminfo:/opt/homebrew/share/terminfo" \
+  --with-fallbacks="xterm,xterm-256color,xterm-color,screen,screen-256color,tmux,tmux-256color,vt100,ansi,dumb,linux,rxvt-unicode-256color,alacritty,ghostty" \
+  --enable-symlinks --disable-stripping
+make -j "$PARALLEL_JOBS"
+make install
+
+#
 # PCRE2 (mc's search engine)
 #
 unpack "pcre2-$PCRE2_VERSION.tar.gz"
@@ -214,6 +238,8 @@ meson.pyz install -C _build
 unpack "mc-$MC_VERSION.tar.bz2"
 MC_FRAMEWORKS="-framework Foundation -framework CoreFoundation -framework AppKit -framework Carbon"
 MC_GLIB_LIBS="$path_to_install/lib/libglib-2.0.a $path_to_install/lib/libintl.a -liconv -lm $MC_FRAMEWORKS -lpcre2-8"
+# Our static ncursesw, not the 5.4 stub in /usr/lib.
+MC_CURSES_LIBS="$path_to_install/lib/libncursesw.a $path_to_install/lib/libtinfow.a"
 CFLAGS="-I$path_to_install/include" \
 LDFLAGS="-L$path_to_install/lib" \
 ./configure --prefix="$MC_INSTALL_DIRECTORY" \
@@ -221,12 +247,12 @@ LDFLAGS="-L$path_to_install/lib" \
   --with-libintl-prefix="$path_to_install" \
   --with-pcre2="$path_to_install" \
   --enable-static \
-  --with-screen=ncurses \
+  --with-screen=ncursesw \
   --with-glib-static=yes \
   GLIB_LIBDIR="$path_to_install/lib" \
   GLIB_LIBS="$MC_GLIB_LIBS" \
   GMODULE_LIBS="$path_to_install/lib/libgmodule-2.0.a" \
-  LIBS="$path_to_install/lib/libgmodule-2.0.a $path_to_install/lib/libintl.a $MC_GLIB_LIBS"
+  LIBS="$path_to_install/lib/libgmodule-2.0.a $path_to_install/lib/libintl.a $MC_GLIB_LIBS $MC_CURSES_LIBS"
 make -j "$PARALLEL_JOBS"
 
 #
@@ -242,3 +268,37 @@ echo "Built mc $MC_VERSION, staged under $path_to_stage$MC_INSTALL_DIRECTORY"
 # as far as printing --version, and CI runners have no TERM.
 TERM="${TERM:-xterm}" "$path_to_stage$MC_INSTALL_DIRECTORY/bin/mc" --version
 otool -L "$path_to_stage$MC_INSTALL_DIRECTORY/bin/mc"
+
+# --version never touches curses, so it would not have caught the 5.4/6.x
+# header-vs-library mismatch that used to segfault on startup. Drive the real
+# UI for a moment instead: start mc on a pty and quit it with F10.
+echo
+if ! command -v expect >/dev/null 2>&1; then
+  echo "Smoke test: skipped, expect is not installed"
+  exit 0
+fi
+echo "Smoke test: starting the full-screen UI"
+TERM=xterm MC_DATADIR="$path_to_stage$MC_INSTALL_DIRECTORY/share/mc" \
+  expect -c "
+    set timeout 30
+    spawn $path_to_stage$MC_INSTALL_DIRECTORY/bin/mc --nomouse
+    expect {
+      -re {Left|File|Command} { }
+      timeout { puts \"\nUI did not appear\"; exit 1 }
+      eof     { puts \"\nmc exited or crashed at startup\"; exit 1 }
+    }
+    # F10, then confirm the quit dialog if this build asks.
+    send \"\033\[21~\"
+    expect {
+      -re {[Yy]es} { send \"\r\" ; expect eof }
+      eof          { }
+      timeout      { puts \"\nmc did not quit\"; exit 1 }
+    }
+    catch wait result
+    set status [lindex \$result 3]
+    if { [lindex \$result 2] != 0 || \$status > 1 } {
+      puts \"\nmc terminated abnormally: \$result\"
+      exit 1
+    }
+  " > /dev/null
+echo "UI started and exited cleanly"
