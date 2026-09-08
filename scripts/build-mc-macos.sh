@@ -190,11 +190,15 @@ unpack "ncurses-$NCURSES_VERSION.tar.gz"
   --enable-widec --enable-ext-colors --enable-ext-mouse \
   --enable-pc-files --with-pkg-config-libdir="$path_to_install/lib/pkgconfig" \
   --with-termlib \
-  --with-default-terminfo-dir=/usr/share/terminfo \
-  --with-terminfo-dirs="/usr/share/terminfo:/usr/local/share/terminfo:/opt/homebrew/share/terminfo" \
+  --with-default-terminfo-dir="$MC_INSTALL_DIRECTORY/share/terminfo" \
+  --with-terminfo-dirs="$MC_INSTALL_DIRECTORY/share/terminfo:/usr/share/terminfo:/opt/homebrew/share/terminfo" \
   --enable-symlinks --disable-stripping
 make -j "$PARALLEL_JOBS"
-make install
+# The compiled-in default terminfo directory doubles as the install target, and
+# it has to name where mc will finally live so a /usr/local install just works.
+# Override TICDIR at install time so the database actually lands in our own
+# prefix rather than in the runner's unwritable /usr/local.
+make install TICDIR="$path_to_install/share/terminfo"
 
 # Compiling terminfo entries into the library (--with-fallbacks) would need a
 # working tic before ncurses is built, and the tic macOS ships is 5.4: it dies
