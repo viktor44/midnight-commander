@@ -50,9 +50,11 @@ jobs:
 
           # mc has /usr/local baked in as its prefix, so an archive unpacked
           # anywhere else cannot find its skins, syntax files or help, and
-          # startup fails with "Unable to load 'default' skin". MC_DATADIR is
-          # the supported override, so move the binary aside as mc.bin and take
-          # over the program names with a launcher that sets it.
+          # startup fails with "Unable to load 'default' skin", nor its syntax
+          # files. MC_DATADIR and MC_SYSCONFDIR override the two trees (see
+          # patches/mc-datadir-relocatable.patch), so move the binary aside as
+          # mc.bin and take over the program names with a launcher that sets
+          # them.
           #
           # mc chooses viewer, editor or diff mode from basename(argv[0]), and
           # a shell cannot exec with an argv[0] of its own choosing - so every
@@ -82,6 +84,7 @@ jobs:
           bindir=$(cd "$(dirname "$self")" && pwd)
           prefix=$(cd "$bindir/.." && pwd)
           export MC_DATADIR="$prefix/share/mc"
+          export MC_SYSCONFDIR="$prefix/etc/mc"
           export TERMINFO_DIRS="$prefix/share/terminfo:${TERMINFO_DIRS:-/usr/share/terminfo}"
           exec "$bindir/$prog.bin" "$@"
           WRAPPER

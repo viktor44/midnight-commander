@@ -18,6 +18,9 @@ path_to_install="$PWD/tmp/installdir"
 path_to_stage="$PWD/tmp/stagedir"
 mkdir -p "$path_to_build" "$path_to_source" "$path_to_install" "$path_to_stage"
 
+# Absolute, because the build cds into each unpacked source tree.
+path_to_patches=$(cd "$(dirname "$0")/../patches" && pwd)
+
 export PATH="$path_to_install/bin:$PATH"
 
 #
@@ -248,6 +251,12 @@ meson.pyz install -C _build
 # Midnight Commander
 #
 unpack "mc-$MC_VERSION.tar.bz2"
+
+# Without this, only the config directory follows MC_DATADIR, so a relocated
+# tree finds its skins but not its syntax files, help or keymaps. See the
+# patch header for the details.
+patch -p1 < "$path_to_patches/mc-datadir-relocatable.patch"
+
 MC_FRAMEWORKS="-framework Foundation -framework CoreFoundation -framework AppKit -framework Carbon"
 MC_GLIB_LIBS="$path_to_install/lib/libglib-2.0.a $path_to_install/lib/libintl.a -liconv -lm $MC_FRAMEWORKS -lpcre2-8"
 # Our static ncursesw, not the 5.4 stub in /usr/lib.
@@ -296,6 +305,7 @@ fi
 echo "Smoke test: starting the full-screen UI"
 TERM=xterm \
 MC_DATADIR="$path_to_stage$MC_INSTALL_DIRECTORY/share/mc" \
+MC_SYSCONFDIR="$path_to_stage$MC_INSTALL_DIRECTORY/etc/mc" \
 TERMINFO_DIRS="$path_to_stage$MC_INSTALL_DIRECTORY/share/terminfo:/usr/share/terminfo" \
   expect -c "
     set timeout 30

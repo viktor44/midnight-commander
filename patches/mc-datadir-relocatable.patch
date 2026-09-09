@@ -1,0 +1,52 @@
+Let MC_DATADIR relocate the data directory, and add MC_SYSCONFDIR.
+
+mc keeps two installed trees apart: share_data_dir (share/mc - skins, syntax,
+help, charsets) and sysconfig_dir (etc/mc - keymaps, mc.ext.ini, menus). Only
+one of them could be moved, and it was the wrong one: MC_DATADIR was applied
+to sysconfig_dir, leaving share_data_dir pinned to the compiled-in DATADIR.
+
+So an archive unpacked outside its configured prefix found its skins, which
+are searched under sysconfig_dir, but not the syntax files, which are not:
+
+  Cannot open file /Users/<user>/.local/share/mc/syntax/Syntax
+
+mc's manual already describes the intended behaviour - of MC_DATADIR it says
+"If it's set, its value is used instead of %pkgdatadir% in the paths below",
+%pkgdatadir% being share/mc. Make MC_DATADIR override share_data_dir as
+documented, and give sysconfig_dir its own MC_SYSCONFDIR, so a relocated
+install can point each at the right place. Both fall back to the values
+compiled in at configure time.
+
+--- a/src/main.c
++++ b/src/main.c
+@@ -134,18 +134,25 @@
+ OS_Setup (void)
+ {
+     const char *datadir_env;
++    const char *sysconfdir_env;
+ 
+     mc_shell_init ();
+ 
+-    /* This is the directory, where MC was installed, on Unix this is DATADIR */
++    /* This is the directory, where MC was installed, on Unix this is SYSCONFDIR */
++    /* and can be overridden by the MC_SYSCONFDIR environment variable */
++    sysconfdir_env = g_getenv ("MC_SYSCONFDIR");
++    if (sysconfdir_env != NULL)
++        mc_global.sysconfig_dir = g_strdup (sysconfdir_env);
++    else
++        mc_global.sysconfig_dir = g_strdup (SYSCONFDIR);
++
++    /* The package data directory, on Unix this is DATADIR */
+     /* and can be overridden by the MC_DATADIR environment variable */
+     datadir_env = g_getenv ("MC_DATADIR");
+     if (datadir_env != NULL)
+-        mc_global.sysconfig_dir = g_strdup (datadir_env);
++        mc_global.share_data_dir = g_strdup (datadir_env);
+     else
+-        mc_global.sysconfig_dir = g_strdup (SYSCONFDIR);
+-
+-    mc_global.share_data_dir = g_strdup (DATADIR);
++        mc_global.share_data_dir = g_strdup (DATADIR);
+ }
+ 
+ /* --------------------------------------------------------------------------------------------- */
