@@ -51,17 +51,18 @@ jobs:
           # mc has /usr/local baked in as its prefix, so an archive unpacked
           # anywhere else cannot find its skins, syntax files or help, and
           # startup fails with "Unable to load 'default' skin". MC_DATADIR is
-          # the supported override, so replace each program in bin/ with a
-          # launcher that sets it relative to the archive and move the real
-          # binaries aside as *.bin. mc picks its mode from basename(argv[0]),
-          # hence one wrapper per name rather than a single shared one.
+          # the supported override, so move the binary aside as mc.bin and put
+          # a launcher that sets it in place of each program name. mc picks its
+          # mode from basename(argv[0]), so exec'ing through a shell script
+          # needs one wrapper and one .bin name per mode.
           prefix=tmp/stagedir/usr/local
+          mv "$prefix/bin/mc" "$prefix/bin/mc.bin"
           for prog in mc mcedit mcview mcdiff; do
-            # mcedit and friends ship as symlinks to mc; resolve them so each
-            # .bin is a real file and the wrapper below keeps its own name.
-            target=$(cd "$prefix/bin" && pwd)/$prog
-            [ -e "$target" ] || continue
-            cp "$(readlink -f "$target" 2>/dev/null || echo "$target")" "$prefix/bin/$prog.bin"
+            target=$prefix/bin/$prog
+            # mcedit and friends are symlinks to mc upstream; keep that shape,
+            # since all four names run the same binary and it only needs its
+            # own argv[0] to pick viewer, editor or diff mode.
+            [ "$prog" = mc ] || ln -sf mc.bin "$prefix/bin/$prog.bin"
             rm -f "$target"
             cat > "$target" <<WRAPPER
           #!/bin/sh
