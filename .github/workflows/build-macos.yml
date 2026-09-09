@@ -51,29 +51,45 @@ jobs:
           # mc has /usr/local baked in as its prefix, so an archive unpacked
           # anywhere else cannot find its skins, syntax files or help, and
           # startup fails with "Unable to load 'default' skin". MC_DATADIR is
-          # the supported override, so move the binary aside as mc.bin and put
-          # a launcher that sets it in place of each program name. mc picks its
-          # mode from basename(argv[0]), so exec'ing through a shell script
-          # needs one wrapper and one .bin name per mode.
+          # the supported override, so move the binary aside as mc.bin and take
+          # over the program names with a launcher that sets it.
+          #
+          # mc chooses viewer, editor or diff mode from basename(argv[0]), and
+          # a shell cannot exec with an argv[0] of its own choosing - so every
+          # mode needs a distinct .bin name to exec. They are all symlinks to
+          # the one real binary, and so are the four program names: the single
+          # launcher works out which is which from its own name.
           prefix=tmp/stagedir/usr/local
           mv "$prefix/bin/mc" "$prefix/bin/mc.bin"
-          for prog in mc mcedit mcview mcdiff; do
-            target=$prefix/bin/$prog
-            # mcedit and friends are symlinks to mc upstream; keep that shape,
-            # since all four names run the same binary and it only needs its
-            # own argv[0] to pick viewer, editor or diff mode.
-            [ "$prog" = mc ] || ln -sf mc.bin "$prefix/bin/$prog.bin"
-            rm -f "$target"
-            cat > "$target" <<WRAPPER
+          cat > "$prefix/bin/mc-launcher" <<'WRAPPER'
           #!/bin/sh
-          # Portable launcher: run $prog from wherever this archive was unpacked.
-          bindir=\$(cd "\$(dirname "\$0")" && pwd)
-          prefix=\$(cd "\$bindir/.." && pwd)
-          export MC_DATADIR="\$prefix/share/mc"
-          export TERMINFO_DIRS="\$prefix/share/terminfo:\${TERMINFO_DIRS:-/usr/share/terminfo}"
-          exec "\$bindir/$prog.bin" "\$@"
+          # Portable launcher: run mc from wherever this archive was unpacked.
+          # Invoked through the mc, mcedit, mcview and mcdiff symlinks.
+          prog=$(basename "$0")
+
+          # Follow symlinks by hand so that a link made from elsewhere, say
+          # ~/bin/mc -> /opt/mc/bin/mc, still resolves the archive's own bin
+          # directory. readlink -f is not portable enough to rely on here.
+          self=$0
+          while [ -L "$self" ]; do
+            link=$(readlink "$self")
+            case $link in
+              /*) self=$link ;;
+              *)  self=$(dirname "$self")/$link ;;
+            esac
+          done
+
+          bindir=$(cd "$(dirname "$self")" && pwd)
+          prefix=$(cd "$bindir/.." && pwd)
+          export MC_DATADIR="$prefix/share/mc"
+          export TERMINFO_DIRS="$prefix/share/terminfo:${TERMINFO_DIRS:-/usr/share/terminfo}"
+          exec "$bindir/$prog.bin" "$@"
           WRAPPER
-            chmod +x "$target"
+          chmod +x "$prefix/bin/mc-launcher"
+          for prog in mc mcedit mcview mcdiff; do
+            [ "$prog" = mc ] || ln -sf mc.bin "$prefix/bin/$prog.bin"
+            rm -f "$prefix/bin/$prog"
+            ln -s mc-launcher "$prefix/bin/$prog"
           done
 
           tar czf "${name}.tar.gz" -C tmp/stagedir/usr/local .
