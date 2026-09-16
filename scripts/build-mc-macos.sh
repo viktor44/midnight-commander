@@ -261,6 +261,15 @@ MC_FRAMEWORKS="-framework Foundation -framework CoreFoundation -framework AppKit
 MC_GLIB_LIBS="$path_to_install/lib/libglib-2.0.a $path_to_install/lib/libintl.a -liconv -lm $MC_FRAMEWORKS -lpcre2-8"
 # Our static ncursesw, not the 5.4 stub in /usr/lib.
 MC_CURSES_LIBS="$path_to_install/lib/libncursesw.a"
+# configure bakes the interpreters it finds into the extfs.d helper scripts,
+# as shebangs for the perl and python ones and as inline commands elsewhere.
+# On a runner with Homebrew that means "#! /opt/homebrew/bin/perl", a path
+# that does not exist on the machines this archive is built for. Pin them to
+# the same PATH-relative forms configure itself falls back to when the tool
+# is missing, so each is resolved on the machine that runs mc. The spelling
+# matters: AC_PATH_PROG takes a preset verbatim only if it looks like an
+# absolute path and searches PATH otherwise, so "/usr/bin/env perl" sticks
+# where a bare "perl" would be resolved right back to the Homebrew one.
 CFLAGS="-I$path_to_install/include" \
 LDFLAGS="-L$path_to_install/lib" \
 ./configure --prefix="$MC_INSTALL_DIRECTORY" \
@@ -270,6 +279,12 @@ LDFLAGS="-L$path_to_install/lib" \
   --enable-static \
   --with-screen=ncursesw \
   --with-glib-static=yes \
+  PERL="/usr/bin/env perl" \
+  PYTHON="/usr/bin/env python3" \
+  RUBY="/usr/bin/env ruby" \
+  AWK=awk \
+  ZIP="/usr/bin/env zip" \
+  UNZIP="/usr/bin/env unzip" \
   GLIB_LIBDIR="$path_to_install/lib" \
   GLIB_LIBS="$MC_GLIB_LIBS" \
   GMODULE_LIBS="$path_to_install/lib/libgmodule-2.0.a" \
@@ -330,6 +345,23 @@ for rel in $mc_prefix_files $(cd "$path_to_stage$MC_INSTALL_DIRECTORY" && ls lib
     exit 1
   fi
 done
+
+#
+# Nothing in the archive may point at a path that exists only on the build
+# machine: Homebrew, or the sandbox the dependencies were compiled into. Those
+# leak in through configure, which records the absolute path of every tool it
+# finds, and they fail on the target as a missing interpreter or helper.
+#
+leaks=$(grep -rIl -e '/opt/homebrew' -e '/usr/local/Cellar' -e "$path_to_install" \
+  "$path_to_stage$MC_INSTALL_DIRECTORY" 2>/dev/null || true)
+if [ -n "$leaks" ]; then
+  echo "ERROR: staged files reference build-machine-only paths:" >&2
+  for f in $leaks; do
+    echo "  ${f#"$path_to_stage$MC_INSTALL_DIRECTORY/"}" >&2
+    grep -n -e '/opt/homebrew' -e '/usr/local/Cellar' -e "$path_to_install" "$f" | head -3 >&2
+  done
+  exit 1
+fi
 
 echo
 echo "Built mc $MC_VERSION, staged under $path_to_stage$MC_INSTALL_DIRECTORY"
