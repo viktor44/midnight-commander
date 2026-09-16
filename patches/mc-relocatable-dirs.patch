@@ -1,0 +1,122 @@
+Let the three installed directories be relocated at runtime.
+
+mc resolves its installed files through three compiled-in prefixes:
+
+  SYSCONFDIR   etc/mc        keymaps, menus, mc.ext.ini, filehighlight.ini
+  DATADIR      share/mc      skins, syntax, help, charsets
+  LIBEXECDIR   libexec/mc    ext.d and extfs.d helpers, shell VFS scripts
+
+Only one of them could be moved, and it was the wrong one: MC_DATADIR was
+applied to sysconfig_dir, leaving share_data_dir and libexec_dir pinned to
+the paths compiled in at configure time. An archive unpacked outside that
+prefix therefore found its skins, which are searched under sysconfig_dir,
+but not the syntax files:
+
+  Cannot open file /Users/<user>/.local/share/mc/syntax/Syntax
+
+nor the extfs.d plugins that browse archives, nor the shell VFS helpers.
+
+mc's manual already describes the intended behaviour of MC_DATADIR - "If
+it's set, its value is used instead of %pkgdatadir% in the paths below",
+%pkgdatadir% being share/mc. Make MC_DATADIR override share_data_dir as
+documented, and give the other two their own MC_SYSCONFDIR and
+MC_LIBEXECDIR. All three fall back to the compiled-in values, so an
+install into the configured prefix behaves exactly as before.
+
+The command lines in mc.ext.ini are a separate matter: they are written to
+a /bin/sh script and executed, so a ${MC_LIBEXECDIR:-...} written into the
+file is expanded by the shell and needs no code change here.
+
+--- a/lib/global.h
++++ b/lib/global.h
+@@ -104,10 +104,14 @@
+     gboolean midnight_shutdown;
+ 
+     /* sysconfig_dir: Area for default settings from maintainers of distributuves
+-       default is /etc/mc or may be defined by MC_DATADIR */
++       default is /etc/mc or may be defined by MC_SYSCONFDIR */
+     char *sysconfig_dir;
+-    /* share_data_dir: Area for default settings from developers */
++    /* share_data_dir: Area for default settings from developers
++       default is /usr/share/mc or may be defined by MC_DATADIR */
+     char *share_data_dir;
++    /* libexec_dir: Area for helper scripts - ext.d, extfs.d, shell
++       default is /usr/libexec/mc or may be defined by MC_LIBEXECDIR */
++    char *libexec_dir;
+ 
+     char *profile_name;
+ 
+--- a/lib/global.c
++++ b/lib/global.c
+@@ -59,6 +59,7 @@
+ 
+     .sysconfig_dir = NULL,
+     .share_data_dir = NULL,
++    .libexec_dir = NULL,
+ 
+     .profile_name = NULL,
+ 
+--- a/src/main.c
++++ b/src/main.c
+@@ -134,18 +134,34 @@
+ OS_Setup (void)
+ {
+     const char *datadir_env;
++    const char *sysconfdir_env;
++    const char *libexecdir_env;
+ 
+     mc_shell_init ();
+ 
+-    /* This is the directory, where MC was installed, on Unix this is DATADIR */
++    /* The system configuration directory, on Unix this is SYSCONFDIR */
++    /* and can be overridden by the MC_SYSCONFDIR environment variable */
++    sysconfdir_env = g_getenv ("MC_SYSCONFDIR");
++    if (sysconfdir_env != NULL)
++        mc_global.sysconfig_dir = g_strdup (sysconfdir_env);
++    else
++        mc_global.sysconfig_dir = g_strdup (SYSCONFDIR);
++
++    /* The package data directory, on Unix this is DATADIR */
+     /* and can be overridden by the MC_DATADIR environment variable */
+     datadir_env = g_getenv ("MC_DATADIR");
+     if (datadir_env != NULL)
+-        mc_global.sysconfig_dir = g_strdup (datadir_env);
++        mc_global.share_data_dir = g_strdup (datadir_env);
+     else
+-        mc_global.sysconfig_dir = g_strdup (SYSCONFDIR);
++        mc_global.share_data_dir = g_strdup (DATADIR);
+ 
+-    mc_global.share_data_dir = g_strdup (DATADIR);
++    /* The helper script directory, on Unix this is LIBEXECDIR */
++    /* and can be overridden by the MC_LIBEXECDIR environment variable */
++    libexecdir_env = g_getenv ("MC_LIBEXECDIR");
++    if (libexecdir_env != NULL)
++        mc_global.libexec_dir = g_strdup (libexecdir_env);
++    else
++        mc_global.libexec_dir = g_strdup (LIBEXECDIR);
+ }
+ 
+ /* --------------------------------------------------------------------------------------------- */
+--- a/src/vfs/extfs/extfs.c
++++ b/src/vfs/extfs/extfs.c
+@@ -1656,7 +1656,7 @@
+     /* 1st: scan user directory */
+     d1 = extfs_get_plugins (mc_config_get_data_path (), TRUE);  /* silent about user dir */
+     /* 2nd: scan system dir */
+-    d2 = extfs_get_plugins (LIBEXECDIR, d1);
++    d2 = extfs_get_plugins (mc_global.libexec_dir, d1);
+ 
+     return (d1 || d2 ? 1 : 0);
+ }
+--- a/src/vfs/shell/shell.c
++++ b/src/vfs/shell/shell.c
+@@ -211,7 +211,8 @@
+     if (scr_content == NULL)
+     {
+         scr_filename =
+-            g_build_path (PATH_SEP_STR, LIBEXECDIR, VFS_SHELL_PREFIX, script_name, (char *) NULL);
++            g_build_path (PATH_SEP_STR, mc_global.libexec_dir, VFS_SHELL_PREFIX, script_name,
++                          (char *) NULL);
+         g_file_get_contents (scr_filename, &scr_content, &scr_len, NULL);
+         g_free (scr_filename);
+     }

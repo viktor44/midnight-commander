@@ -252,10 +252,10 @@ meson.pyz install -C _build
 #
 unpack "mc-$MC_VERSION.tar.bz2"
 
-# Without this, only the config directory follows MC_DATADIR, so a relocated
-# tree finds its skins but not its syntax files, help or keymaps. See the
-# patch header for the details.
-patch -p1 < "$path_to_patches/mc-datadir-relocatable.patch"
+# Without this only the config directory can be relocated, so a tree unpacked
+# elsewhere finds its skins but not its syntax files, help, ext.d viewers or
+# extfs.d archive plugins. See the patch header for the details.
+patch -p1 < "$path_to_patches/mc-relocatable-dirs.patch"
 
 MC_FRAMEWORKS="-framework Foundation -framework CoreFoundation -framework AppKit -framework Carbon"
 MC_GLIB_LIBS="$path_to_install/lib/libglib-2.0.a $path_to_install/lib/libintl.a -liconv -lm $MC_FRAMEWORKS -lpcre2-8"
@@ -287,6 +287,50 @@ make install DESTDIR="$path_to_stage"
 # whatever entries the target machine happens to have.
 cp -R "$path_to_install/share/terminfo" "$path_to_stage$MC_INSTALL_DIRECTORY/share/terminfo"
 
+#
+# Some installed files carry the prefix as text rather than resolving it
+# through the binary, so the patch above cannot reach them:
+#
+#   etc/mc/mc.ext.ini          the commands that open and view files, which
+#                              point at libexec/mc/ext.d
+#   libexec/mc/ext.d/misc.sh   calls the torrent helper in libexec/mc/extfs.d
+#   libexec/mc/mc-wrapper.sh   optional shell integration, runs bin/mc
+#   libexec/mc/mc.sh           alias that sources mc-wrapper.sh
+#
+# All of them are read by a shell: mc writes each mc.ext.ini command into a
+# /bin/sh script and runs it (src/filemanager/ext.c), quoting only the
+# %-expanded filenames, and the rest are shell scripts outright. So rewriting
+# the two prefixes into ${VAR:-default} form is enough - the shell expands
+# them at run time, and with the variables unset an install into
+# $MC_INSTALL_DIRECTORY behaves exactly as it did before.
+#
+# The csh counterparts are left alone: csh has no ${VAR:-default}, so they
+# keep the absolute prefix and only work from an install into it.
+#
+# sed replaces from the original text and does not rescan what it inserted,
+# so the default left inside each ${...:-...} survives the pass unchanged.
+#
+mc_prefix_files="
+etc/mc/mc.ext.ini
+libexec/mc/mc-wrapper.sh
+libexec/mc/mc.sh
+"
+for rel in $mc_prefix_files $(cd "$path_to_stage$MC_INSTALL_DIRECTORY" && ls libexec/mc/ext.d/*.sh 2>/dev/null); do
+  path=$path_to_stage$MC_INSTALL_DIRECTORY/$rel
+  [ -f "$path" ] || continue
+  sed -i '' \
+    -e "s|$MC_INSTALL_DIRECTORY/libexec/mc|\${MC_LIBEXECDIR:-$MC_INSTALL_DIRECTORY/libexec/mc}|g" \
+    -e "s|$MC_INSTALL_DIRECTORY/bin|\${MC_BINDIR:-$MC_INSTALL_DIRECTORY/bin}|g" \
+    "$path"
+
+  # Nothing outside a ${VAR:-default} fallback may still name the prefix.
+  if grep -n "$MC_INSTALL_DIRECTORY" "$path" | grep -v ':-' | grep -q .; then
+    echo "ERROR: $rel still names $MC_INSTALL_DIRECTORY outside a fallback" >&2
+    grep -n "$MC_INSTALL_DIRECTORY" "$path" | grep -v ':-' | head >&2
+    exit 1
+  fi
+done
+
 echo
 echo "Built mc $MC_VERSION, staged under $path_to_stage$MC_INSTALL_DIRECTORY"
 # mc bails out with "The TERM environment variable is unset!" before it gets
@@ -306,6 +350,7 @@ echo "Smoke test: starting the full-screen UI"
 TERM=xterm \
 MC_DATADIR="$path_to_stage$MC_INSTALL_DIRECTORY/share/mc" \
 MC_SYSCONFDIR="$path_to_stage$MC_INSTALL_DIRECTORY/etc/mc" \
+MC_LIBEXECDIR="$path_to_stage$MC_INSTALL_DIRECTORY/libexec/mc" \
 TERMINFO_DIRS="$path_to_stage$MC_INSTALL_DIRECTORY/share/terminfo:/usr/share/terminfo" \
   expect -c "
     set timeout 30

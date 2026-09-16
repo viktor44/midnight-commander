@@ -51,8 +51,9 @@ jobs:
           # mc has /usr/local baked in as its prefix, so an archive unpacked
           # anywhere else cannot find its skins, syntax files or help, and
           # startup fails with "Unable to load 'default' skin", nor its syntax
-          # files. MC_DATADIR and MC_SYSCONFDIR override the two trees (see
-          # patches/mc-datadir-relocatable.patch), so move the binary aside as
+          # files or helper scripts. MC_DATADIR, MC_SYSCONFDIR and
+          # MC_LIBEXECDIR override the three installed trees (see
+          # patches/mc-relocatable-dirs.patch), so move the binary aside as
           # mc.bin and take over the program names with a launcher that sets
           # them.
           #
@@ -85,6 +86,8 @@ jobs:
           prefix=$(cd "$bindir/.." && pwd)
           export MC_DATADIR="$prefix/share/mc"
           export MC_SYSCONFDIR="$prefix/etc/mc"
+          export MC_LIBEXECDIR="$prefix/libexec/mc"
+          export MC_BINDIR="$prefix/bin"
           export TERMINFO_DIRS="$prefix/share/terminfo:${TERMINFO_DIRS:-/usr/share/terminfo}"
           exec "$bindir/$prog.bin" "$@"
           WRAPPER
