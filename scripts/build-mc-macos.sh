@@ -257,6 +257,11 @@ unpack "mc-$MC_VERSION.tar.bz2"
 # extfs.d archive plugins. See the patch header for the details.
 patch -p1 < "$path_to_patches/mc-relocatable-dirs.patch"
 
+# The terminfo we ship describes xterm with kmous=\E[<, which sends mc down a
+# path where it decodes SGR mouse reports with the legacy parser and the mouse
+# stops working. Again, see the patch header.
+patch -p1 < "$path_to_patches/mc-sgr-mouse.patch"
+
 MC_FRAMEWORKS="-framework Foundation -framework CoreFoundation -framework AppKit -framework Carbon"
 MC_GLIB_LIBS="$path_to_install/lib/libglib-2.0.a $path_to_install/lib/libintl.a -liconv -lm $MC_FRAMEWORKS -lpcre2-8"
 # Our static ncursesw, not the 5.4 stub in /usr/lib.

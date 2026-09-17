@@ -1,0 +1,74 @@
+Decode SGR mouse events when the screen library ate the prefix.
+
+Clicking in the panels did nothing and left droppings like "5;16M" on the
+screen: the tail of an SGR 1006 mouse report, "\e[<0;5;16M", decoded by the
+legacy parser and partly echoed as text.
+
+mc always turns SGR 1006 reporting on (lib/tty/mouse.c), so every event
+arrives in SGR form, but it can reach xmouse_get_event() by two routes. If
+mc's own key tree matches "\e[<" the event is correctly marked extended. If
+the terminfo "kmous" capability happens to be "\e[<" as well, ncurses matches
+it first, swallows the prefix and hands back KEY_MOUSE - and the test that
+recognises that case requires xmouse_seq to be NULL, which it never is,
+because tty_init_xterm_support() has just rewritten it from "\e[<" to "\e[M"
+a few lines earlier. So the event is decoded as legacy X10.
+
+Which route is taken depends entirely on the terminfo entry. ncurses 5.x
+described xterm with kmous=\E[M, while ncurses 6.x resolves xterm-256color
+through the xterm+sm+1006 building block, where kmous=\E[<. Hence a build
+that carries its own recent terminfo loses the mouse, and the same mc built
+against an older one does not.
+
+Record whether kmous was the SGR sequence and use that to mark the event
+extended, leaving the existing NULL case alone.
+
+--- a/lib/tty/mouse.h
++++ b/lib/tty/mouse.h
+@@ -103,6 +103,11 @@
+ /* String indicating that an SGR extended mouse event has occurred, namely "\E[<" */
+ extern const char *xmouse_extended_seq;
+ 
++/* TRUE when the terminfo "kmous" capability was the SGR sequence "\E[<" rather
++   than the legacy "\E[M", which means the screen library consumes the prefix
++   itself and the event that reaches us is in SGR form. */
++extern gboolean xmouse_kmous_is_sgr;
++
+ /*** declarations of public functions ************************************************************/
+ 
+ /* General (i.e. both for xterm and gpm) mouse support definitions */
+--- a/lib/tty/mouse.c
++++ b/lib/tty/mouse.c
+@@ -49,6 +49,7 @@
+ int mouse_fd = -1;              /* for when gpm_fd changes to < 0 and the old one must be cleared from select_set */
+ const char *xmouse_seq;
+ const char *xmouse_extended_seq;
++gboolean xmouse_kmous_is_sgr = FALSE;
+ 
+ /*** file scope macro definitions ****************************************************************/
+ 
+--- a/lib/tty/tty.c
++++ b/lib/tty/tty.c
+@@ -408,7 +408,10 @@
+     if (xmouse_seq != NULL)
+     {
+         if (strcmp (xmouse_seq, ESC_STR "[<") == 0)
++        {
+             xmouse_seq = ESC_STR "[M";
++            xmouse_kmous_is_sgr = TRUE;
++        }
+ 
+         xmouse_extended_seq = ESC_STR "[<";
+     }
+--- a/lib/tty/key.c
++++ b/lib/tty/key.c
+@@ -2107,8 +2107,8 @@
+         gboolean extended = c == MCKEY_EXTENDED_MOUSE;
+ 
+ #ifdef KEY_MOUSE
+-        extended = extended || (c == KEY_MOUSE && xmouse_seq == NULL
+-                                && xmouse_extended_seq != NULL);
++        extended = extended || (c == KEY_MOUSE && xmouse_extended_seq != NULL
++                                && (xmouse_seq == NULL || xmouse_kmous_is_sgr));
+ #endif /* KEY_MOUSE */
+ 
+         xmouse_get_event (event, extended);
