@@ -13,8 +13,6 @@ The repository holds only the build recipe, not mc itself:
 | `patches/mc-relocatable-dirs.patch` | Lets the archive be unpacked anywhere (see below). |
 | `.github/workflows/build-macos.yml` | Builds on a macOS runner and publishes the archive. |
 
-Based on [kozyilmaz/mc-on-macos](https://github.com/kozyilmaz/mc-on-macos).
-
 ## Using a build
 
 Download `mc-<version>-macos-arm64.tar.gz` from the workflow run's artifacts, or
