@@ -264,6 +264,11 @@ patch -p1 < "$path_to_patches/mc-relocatable-dirs.patch"
 # stops working. Again, see the patch header.
 patch -p1 < "$path_to_patches/mc-sgr-mouse.patch"
 
+# Same terminfo, different problem: it numbers the shifted function keys the
+# xterm way (kf13 = Shift+F1), mc the termcap way (F13 = Shift+F3), so every
+# Shift+Fn lands two keys too high. See the patch header.
+patch -p1 < "$path_to_patches/mc-xterm-shift-fkeys.patch"
+
 MC_FRAMEWORKS="-framework Foundation -framework CoreFoundation -framework AppKit -framework Carbon"
 MC_GLIB_LIBS="$path_to_install/lib/libglib-2.0.a $path_to_install/lib/libintl.a -liconv -lm $MC_FRAMEWORKS -lpcre2-8"
 # Our static ncursesw, not the 5.4 stub in /usr/lib.
