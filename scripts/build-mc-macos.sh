@@ -9,15 +9,6 @@
 #
 set -eu
 
-# Screen library: ncursesw (default) or slang. Upstream's own CI builds mc
-# against slang, which decodes the keyboard and mouse through mc's key tables
-# and needs none of the key/mouse patches below.
-MC_SCREEN="${MC_SCREEN:-ncursesw}"
-case "$MC_SCREEN" in
-  ncursesw|slang) ;;
-  *) echo "ERROR: MC_SCREEN must be ncursesw or slang, not '$MC_SCREEN'" >&2; exit 1 ;;
-esac
-
 # Where the resulting mc expects to find its data files at runtime.
 MC_INSTALL_DIRECTORY="${MC_INSTALL_DIRECTORY:-/usr/local}"
 
@@ -43,7 +34,6 @@ PKGCONFIG_VERSION="${PKGCONFIG_VERSION:-0.29.2}"
 LIBFFI_VERSION="${LIBFFI_VERSION:-3.5.2}"
 GETTEXT_VERSION="${GETTEXT_VERSION:-0.26}"
 PCRE2_VERSION="${PCRE2_VERSION:-10.48}"
-NCURSES_VERSION="${NCURSES_VERSION:-6.6}"
 SLANG_VERSION="${SLANG_VERSION:-2.3.3}"
 NINJA_VERSION="${NINJA_VERSION:-1.13.1}"
 MESON_VERSION="${MESON_VERSION:-1.8.4}"
@@ -94,11 +84,12 @@ gnu_fetch "autoconf-$AUTOCONF_VERSION.tar.gz" autoconf
 gnu_fetch "automake-$AUTOMAKE_VERSION.tar.gz" automake
 gnu_fetch "libtool-$LIBTOOL_VERSION.tar.gz" libtool
 gnu_fetch "gettext-$GETTEXT_VERSION.tar.gz" gettext
-if [ "$MC_SCREEN" = ncursesw ]; then
-  gnu_fetch "ncurses-$NCURSES_VERSION.tar.gz" ncurses
-else
-  fetch "slang-$SLANG_VERSION.tar.bz2"     "https://www.jedsoft.org/releases/slang/slang-$SLANG_VERSION.tar.bz2"     "https://www.jedsoft.org/releases/slang/old/slang-$SLANG_VERSION.tar.bz2"
-fi
+# mc's screen library. Upstream's own CI builds against it too; unlike ncurses
+# it decodes the keyboard and mouse through mc's own key tables, so the 6.x
+# terminfo quirks that broke Shift+keys and the mouse never come into play.
+fetch "slang-$SLANG_VERSION.tar.bz2" \
+  "https://www.jedsoft.org/releases/slang/slang-$SLANG_VERSION.tar.bz2" \
+  "https://www.jedsoft.org/releases/slang/old/slang-$SLANG_VERSION.tar.bz2"
 fetch "pkg-config-$PKGCONFIG_VERSION.tar.gz" \
   "https://pkgconfig.freedesktop.org/releases/pkg-config-$PKGCONFIG_VERSION.tar.gz" \
   "https://distfiles.macports.org/pkgconfig/pkg-config-$PKGCONFIG_VERSION.tar.gz"
@@ -194,59 +185,19 @@ cd gettext-runtime
 make -j "$PARALLEL_JOBS"
 make install
 
-if [ "$MC_SCREEN" = ncursesw ]; then
-
-#
-# Ncurses (wide-character build)
-#
-# macOS ships ncurses.h from 6.0 but only /usr/lib/libncurses.5.4.dylib, so a
-# binary compiled against the SDK headers writes 6.x-shaped structs into a 5.4
-# library and segfaults on the first curses call. There is also no ncursesw at
-# all, which loses UTF-8. Build our own and link it statically.
-#
-# Deliberately no --with-termlib: it splits the terminfo half out into
-# libtinfow, and mc's configure probes for has_colors with a bare -lncursesw,
-# which then fails to link.
-#
-unpack "ncurses-$NCURSES_VERSION.tar.gz"
-./configure --prefix="$path_to_install" \
-  --without-shared --with-normal --without-debug --without-ada --without-tests \
-  --without-manpages --without-cxx-binding \
-  --enable-widec --enable-ext-colors --enable-ext-mouse \
-  --enable-pc-files --with-pkg-config-libdir="$path_to_install/lib/pkgconfig" \
-  --with-default-terminfo-dir="$MC_INSTALL_DIRECTORY/share/terminfo" \
-  --with-terminfo-dirs="$MC_INSTALL_DIRECTORY/share/terminfo:/usr/share/terminfo:/opt/homebrew/share/terminfo" \
-  --enable-symlinks --disable-stripping
-make -j "$PARALLEL_JOBS"
-# The compiled-in default terminfo directory doubles as the install target, and
-# it has to name where mc will finally live so a /usr/local install just works.
-# Override TICDIR at install time so the database actually lands in our own
-# prefix rather than in the runner's unwritable /usr/local.
-make install TICDIR="$path_to_install/share/terminfo"
-
-# Compiling terminfo entries into the library (--with-fallbacks) would need a
-# working tic before ncurses is built, and the tic macOS ships is 5.4: it dies
-# on the modern terminfo.src with "error writing .../scrt". Keep the database
-# on disk instead - install put it under share/terminfo, built by the tic from
-# this very tree - and let the packaged launcher point TERMINFO_DIRS at it.
-
-else
-
 #
 # S-Lang
 #
 # Static only, and without the optional libraries: slang would otherwise pick
 # up whichever of libpng, pcre, oniguruma, zlib and iconv it finds on the
 # runner, and mc uses none of what they add. The build is not parallel-safe.
-# It reads terminfo on its own and honours TERMINFO_DIRS, so no database is
-# shipped; the system one is used.
+# It reads the system terminfo on its own, so none is shipped with mc.
 #
 unpack "slang-$SLANG_VERSION.tar.bz2"
-./configure --prefix="$path_to_install"   --without-png --without-pcre --without-onig --without-z --without-iconv
+./configure --prefix="$path_to_install" \
+  --without-png --without-pcre --without-onig --without-z --without-iconv
 make static
 make install-static
-
-fi
 
 #
 # PCRE2 (mc's search engine)
@@ -293,33 +244,9 @@ unpack "mc-$MC_VERSION.tar.bz2"
 # extfs.d archive plugins. See the patch header for the details.
 patch -p1 < "$path_to_patches/mc-relocatable-dirs.patch"
 
-# The terminfo we ship describes xterm with kmous=\E[<, which sends mc down a
-# path where it decodes SGR mouse reports with the legacy parser and the mouse
-# stops working. Again, see the patch header.
-if [ "$MC_SCREEN" = ncursesw ]; then
-patch -p1 < "$path_to_patches/mc-sgr-mouse.patch"
-
-# Same terminfo, different problem: it numbers the shifted function keys the
-# xterm way (kf13 = Shift+F1), mc the termcap way (F13 = Shift+F3), so every
-# Shift+Fn lands two keys too high. See the patch header.
-patch -p1 < "$path_to_patches/mc-xterm-shift-fkeys.patch"
-
-# And the same terminfo describes Shift+arrows, Shift+Home and friends as
-# capabilities of their own, which ncurses reports as KEY_SR, KEY_SF, ... codes
-# mc ignores, so those keys did nothing. See the patch header.
-patch -p1 < "$path_to_patches/mc-xterm-shift-keys.patch"
-fi
-
 MC_FRAMEWORKS="-framework Foundation -framework CoreFoundation -framework AppKit -framework Carbon"
 MC_GLIB_LIBS="$path_to_install/lib/libglib-2.0.a $path_to_install/lib/libintl.a -liconv -lm $MC_FRAMEWORKS -lpcre2-8"
-if [ "$MC_SCREEN" = ncursesw ]; then
-  # Our static ncursesw, not the 5.4 stub in /usr/lib.
-  MC_CURSES_LIBS="$path_to_install/lib/libncursesw.a"
-  MC_SCREEN_CONFIGURE="--with-screen=ncursesw"
-else
-  MC_CURSES_LIBS="$path_to_install/lib/libslang.a -lm"
-  MC_SCREEN_CONFIGURE="--with-screen=slang"
-fi
+MC_SLANG_LIBS="$path_to_install/lib/libslang.a -lm"
 # configure bakes the interpreters it finds into the extfs.d helper scripts,
 # as shebangs for the perl and python ones and as inline commands elsewhere.
 # On a runner with Homebrew that means "#! /opt/homebrew/bin/perl", a path
@@ -336,7 +263,7 @@ LDFLAGS="-L$path_to_install/lib" \
   --with-libintl-prefix="$path_to_install" \
   --with-pcre2="$path_to_install" \
   --enable-static \
-  $MC_SCREEN_CONFIGURE \
+  --with-screen=slang \
   --with-glib-static=yes \
   PERL="/usr/bin/env perl" \
   PYTHON="/usr/bin/env python3" \
@@ -346,8 +273,10 @@ LDFLAGS="-L$path_to_install/lib" \
   UNZIP="/usr/bin/env unzip" \
   GLIB_LIBDIR="$path_to_install/lib" \
   GLIB_LIBS="$MC_GLIB_LIBS" \
-  GMODULE_LIBS="$path_to_install/lib/libgmodule-2.0.a"   SLANG_CFLAGS="-I$path_to_install/include"   SLANG_LIBS="$path_to_install/lib/libslang.a -lm" \
-  LIBS="$path_to_install/lib/libgmodule-2.0.a $path_to_install/lib/libintl.a $MC_GLIB_LIBS $MC_CURSES_LIBS"
+  GMODULE_LIBS="$path_to_install/lib/libgmodule-2.0.a" \
+  SLANG_CFLAGS="-I$path_to_install/include" \
+  SLANG_LIBS="$MC_SLANG_LIBS" \
+  LIBS="$path_to_install/lib/libgmodule-2.0.a $path_to_install/lib/libintl.a $MC_GLIB_LIBS $MC_SLANG_LIBS"
 make -j "$PARALLEL_JOBS"
 
 #
@@ -356,12 +285,6 @@ make -j "$PARALLEL_JOBS"
 #
 rm -rf "$path_to_stage"
 make install DESTDIR="$path_to_stage"
-
-# Ship the terminfo database we compiled, so the binary is not at the mercy of
-# whatever entries the target machine happens to have.
-if [ "$MC_SCREEN" = ncursesw ]; then
-  cp -R "$path_to_install/share/terminfo" "$path_to_stage$MC_INSTALL_DIRECTORY/share/terminfo"
-fi
 
 #
 # Some installed files carry the prefix as text rather than resolving it
@@ -444,7 +367,6 @@ TERM=xterm \
 MC_DATADIR="$path_to_stage$MC_INSTALL_DIRECTORY/share/mc" \
 MC_SYSCONFDIR="$path_to_stage$MC_INSTALL_DIRECTORY/etc/mc" \
 MC_LIBEXECDIR="$path_to_stage$MC_INSTALL_DIRECTORY/libexec/mc" \
-TERMINFO_DIRS="$path_to_stage$MC_INSTALL_DIRECTORY/share/terminfo:/usr/share/terminfo" \
   expect -c "
     set timeout 30
     spawn $path_to_stage$MC_INSTALL_DIRECTORY/bin/mc --nomouse

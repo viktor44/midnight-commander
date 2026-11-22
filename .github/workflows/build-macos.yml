@@ -11,16 +11,9 @@ on:
         description: 'Midnight Commander version to build'
         required: false
         default: '4.8.33'
-      screen:
-        description: 'Screen library to build against'
-        required: false
-        type: choice
-        options: [ncursesw, slang]
-        default: ncursesw
 
 env:
   MC_VERSION: ${{ github.event.inputs.mc_version || '4.8.33' }}
-  MC_SCREEN: ${{ github.event.inputs.screen || 'ncursesw' }}
   # Runners have no TERM, and mc refuses to start without one.
   TERM: xterm
 
@@ -47,7 +40,6 @@ jobs:
         run: sh ./scripts/build-mc-macos.sh
         env:
           MC_VERSION: ${{ env.MC_VERSION }}
-          MC_SCREEN: ${{ env.MC_SCREEN }}
 
       - name: Package
         id: package
@@ -55,8 +47,6 @@ jobs:
           set -eu
           arch=$(uname -m)
           name="mc-${MC_VERSION}-macos-${arch}"
-          # The default build keeps its name; the experimental one is marked.
-          [ "$MC_SCREEN" = ncursesw ] || name="${name}-${MC_SCREEN}"
 
           # mc has /usr/local baked in as its prefix, so an archive unpacked
           # anywhere else cannot find its skins, syntax files or help, and
@@ -98,7 +88,6 @@ jobs:
           export MC_SYSCONFDIR="$prefix/etc/mc"
           export MC_LIBEXECDIR="$prefix/libexec/mc"
           export MC_BINDIR="$prefix/bin"
-          export TERMINFO_DIRS="$prefix/share/terminfo:${TERMINFO_DIRS:-/usr/share/terminfo}"
           exec "$bindir/$prog.bin" "$@"
           WRAPPER
           chmod +x "$prefix/bin/mc-launcher"
